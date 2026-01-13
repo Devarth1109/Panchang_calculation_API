@@ -350,29 +350,29 @@ def karana(jd, place):
   # 3. Find karana at sunrise (UT)
   moon_phase = lunar_phase(rise)
   today = ceil(moon_phase / 6)
-  
+    
   # 4. Compute longitudinal differences at intervals of 0.25 days from sunrise
   offsets = [0.25, 0.5, 0.75, 1.0]
   lunar_long_diff = [ (lunar_longitude(rise + t) - lunar_longitude(rise)) % 360 for t in offsets ]
   solar_long_diff = [ (solar_longitude(rise + t) - solar_longitude(rise)) % 360 for t in offsets ]
-  relative_motion = [ moon - sun for (moon, sun) in zip(lunar_long_diff, solar_long_diff) ]
+  relative_motion = [ norm180(moon - sun) for (moon, sun) in zip(lunar_long_diff, solar_long_diff) ]
 
   answer = []
   
   # 5. If karana at midnight is different from karana at sunrise, include it first
   if karana_at_midnight != today:
-    degrees_left = karana_at_midnight * 6 - moon_phase_midnight
+    degrees_left = norm180(karana_at_midnight * 6 - moon_phase_midnight)
     # Use midnight as reference point for this karana
     midnight_offsets = [0.25, 0.5, 0.75, 1.0]
     midnight_lunar_diff = [ (lunar_longitude(jd + t) - lunar_longitude(jd)) % 360 for t in midnight_offsets ]
     midnight_solar_diff = [ (solar_longitude(jd + t) - solar_longitude(jd)) % 360 for t in midnight_offsets ]
-    midnight_relative = [ moon - sun for (moon, sun) in zip(midnight_lunar_diff, midnight_solar_diff) ]
+    midnight_relative = [ norm180(moon - sun) for (moon, sun) in zip(midnight_lunar_diff, midnight_solar_diff) ]
     approx_end = inverse_lagrange(midnight_offsets, midnight_relative, degrees_left)
     ends = (jd + approx_end - jd) * 24 + tz
     answer = [int(karana_at_midnight), to_dms(ends)]
   
   # 6. Add karana at sunrise
-  degrees_left = today * 6 - moon_phase
+  degrees_left = norm180(today * 6 - moon_phase)
   y = relative_motion
   x = offsets
   approx_end = inverse_lagrange(x, y, degrees_left)
@@ -389,13 +389,13 @@ def karana(jd, place):
     leap_karana = (today % 60) + 1
     if leap_karana > 60:
       leap_karana = 1
-    degrees_left = leap_karana * 6 - moon_phase
+    degrees_left = norm180(leap_karana * 6 - moon_phase)
     approx_end = inverse_lagrange(x, y, degrees_left)
     ends = (rise + approx_end - jd) * 24 + tz
     answer += [int(leap_karana), to_dms(ends)]
     
     # Check if there's yet another karana (3rd one)
-    if karanas_diff > 2:
+    if karanas_diff >= 2:
       leap_karana2 = (leap_karana % 60) + 1
       if leap_karana2 > 60:
         leap_karana2 = 1

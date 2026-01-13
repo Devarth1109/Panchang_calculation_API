@@ -405,7 +405,7 @@ SAMVAT_YEAR_NAMES = [
     "Prabhava", "Vibhava", "Shukla", "Pramoda", "Prajapati",
     "Angirasa", "Shrimukha", "Bhava", "Yuva", "Dhatri",
     "Ishvara", "Bahudhanya", "Pramathi", "Vikrama", "Vrisha",
-    "Chitrabhanu", "Svabhanu", "Tarana", "Parthiva", "Vyaya",
+    "Chitrabhanu", "Subhanu", "Tarana", "Parthiva", "Vyaya",
     "Sarvajit", "Sarvadharin", "Virodhin", "Vikrita", "Khara",
     "Nandana", "Vijaya", "Jaya", "Manmatha", "Durmukha",
     "Hemalamba", "Vilamba", "Vikarin", "Sharvari", "Plava",
@@ -413,7 +413,7 @@ SAMVAT_YEAR_NAMES = [
     "Plavanga", "Kilaka", "Saumya", "Sadharana", "Virodhikrit",
     "Paridhavi", "Pramadin", "Ananda", "Rakshasa", "Anala",
     "Pingala", "Kalayukta", "Siddharthi", "Raudra", "Durmati",
-    "Dundubhi", "Rudhirodgarin", "Raktaksha", "Krodhana", "Akshaya"
+    "Dundubhi", "Rudhirodgarin", "Raktaksha", "Krodhana", "Kshaya"
 ]
 
 KARANA_NAMES = ["Bava", "Balava", "Kaulava", "Taitila", "Gara", "Vanija", "Vishti"]

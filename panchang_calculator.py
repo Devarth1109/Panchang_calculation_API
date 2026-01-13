@@ -77,6 +77,116 @@ AMRIT_KALAM_START_HOURS = {
 
 MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
+# =============================================================================
+# BRIHASPATI SAMVATSARA CYCLE - Kshaya/Adhika Year Calculation
+# =============================================================================
+
+def _find_mesha_sankranti_jd(year):
+    """Find JD of Mesha Sankranti (Sun at 0° sidereal Aries) for a given CE year."""
+    # Ensure Lahiri ayanamsa is set
+    sankranti.set_ayanamsa_mode()
+    
+    start_jd = swe.julday(year, 4, 10, 0)
+    flags = swe.FLG_SIDEREAL
+    jd = start_jd
+    for _ in range(50):
+        sun_pos = swe.calc_ut(jd, swe.SUN, flags)[0][0]
+        diff = sun_pos - 360 if sun_pos > 350 else sun_pos
+        if abs(diff) < 0.0001:
+            break
+        jd -= diff / 1.0
+    return jd
+
+def _get_jupiter_rashi(jd):
+    """Get Jupiter's sidereal rashi (0-11) at given JD."""
+    # Ensure Lahiri ayanamsa is set
+    sankranti.set_ayanamsa_mode()
+    
+    flags = swe.FLG_SIDEREAL
+    pos = swe.calc_ut(jd, swe.JUPITER, flags)[0][0]
+    return int(pos / 30)
+
+def _calculate_kshaya_adhika_years(start_vikram, end_vikram):
+    """
+    Calculate Kshaya and Adhika samvatsara years in the given range.
+    
+    Kshaya (expunged): Jupiter skips a rashi between consecutive Mesha Sankrantis
+    Adhika (extra): Jupiter stays in same rashi between consecutive Mesha Sankrantis
+    
+    Returns: (kshaya_years, adhika_years) - lists of Vikram years
+    
+    Note: When Jupiter skips a rashi at Mesha Sankranti of Vikram year Y,
+    the Kshaya affects year Y-1 (the samvatsara name is skipped for Y-1's
+    transition into Y). This matches DrikPanchang convention.
+    """
+    kshaya_years = []
+    adhika_years = []
+    
+    prev_rashi = None
+    prev_vikram = None
+    
+    # Scan CE years corresponding to Vikram years
+    # Mesha Sankranti of CE year Y corresponds to Vikram year Y+56
+    for ce_year in range(start_vikram - 56, end_vikram - 56 + 1):
+        jd = _find_mesha_sankranti_jd(ce_year)
+        jupiter_rashi = _get_jupiter_rashi(jd)
+        vikram = ce_year + 56
+        
+        if prev_rashi is not None:
+            diff = (jupiter_rashi - prev_rashi) % 12
+            if diff >= 2:
+                # Jupiter skipped a rashi - Kshaya affects the PREVIOUS year
+                # (the year before the skip is detected)
+                kshaya_years.append(prev_vikram)
+            elif diff == 0:
+                # Jupiter stayed in same rashi - Adhika year
+                adhika_years.append(vikram)
+        
+        prev_rashi = jupiter_rashi
+        prev_vikram = vikram
+    
+    return kshaya_years, adhika_years
+
+# Pre-computed Kshaya/Adhika years for performance (covers 1900-2200 CE / Vikram 1956-2256)
+# These are calculated from Jupiter's actual position at each Mesha Sankranti
+_KSHAYA_YEARS = None
+_ADHIKA_YEARS = None
+
+def _get_kshaya_adhika_years():
+    """Get or compute the Kshaya/Adhika years cache."""
+    global _KSHAYA_YEARS, _ADHIKA_YEARS
+    if _KSHAYA_YEARS is None:
+        _KSHAYA_YEARS, _ADHIKA_YEARS = _calculate_kshaya_adhika_years(1956, 2256)
+    return _KSHAYA_YEARS, _ADHIKA_YEARS
+
+def get_vikram_samvatsara_index(vikram_year):
+    """
+    Calculate the 60-year cycle index for a Vikram Samvat year.
+    
+    Accounts for Kshaya (expunged) and Adhika (extra) samvatsaras that occur
+    because Jupiter's ~11.86 year orbital period doesn't exactly match 12 years.
+    
+    Reference: Vikram 2080 (2023-24 CE) = Nala (index 49), base offset = 9
+    """
+    BASE_VIKRAM = 2080
+    BASE_OFFSET = 9
+    
+    kshaya_years, adhika_years = _get_kshaya_adhika_years()
+    
+    if vikram_year >= BASE_VIKRAM:
+        # Count net Kshaya/Adhika between base and target year
+        kshaya_count = sum(1 for y in kshaya_years if BASE_VIKRAM < y <= vikram_year)
+        adhika_count = sum(1 for y in adhika_years if BASE_VIKRAM < y <= vikram_year)
+        offset_adjustment = kshaya_count - adhika_count
+    else:
+        # For years before base, count backwards
+        kshaya_count = sum(1 for y in kshaya_years if vikram_year < y <= BASE_VIKRAM)
+        adhika_count = sum(1 for y in adhika_years if vikram_year < y <= BASE_VIKRAM)
+        offset_adjustment = -(kshaya_count - adhika_count)
+    
+    effective_offset = BASE_OFFSET + offset_adjustment
+    return (vikram_year + effective_offset) % 60
+
 def format_time_12hr(dms_list, include_date=False, ref_date=None):
     """Converts [H, M, S] list to 12-hour format with AM/PM."""
     h, m, s = dms_list
@@ -191,7 +301,7 @@ def jd_to_time_12hr(jd_ut, tz, ref_date):
     
     return time_str
 
-def get_pravishte(jd, place):
+def get_pravishte(jd_ut, place):
     """
     Calculate Pravishte/Gate: days since Sun entered current rashi (1-indexed)
     
@@ -199,18 +309,26 @@ def get_pravishte(jd, place):
     - Rashi (sign) is determined by Sun's Nirayana longitude
     - Each rashi is 30 degrees
     - Pravishte = number of days since Sun entered current rashi
-    """
-    # Get timezone from place
-    tz = place[2] if isinstance(place, tuple) else place.timezone
     
-    # Get sun's current sidereal longitude
-    sun_long = sankranti.solar_longitude(jd)
+    NOTE: DrikPanchang calculates Pravishte using the local timezone of the location.
+    Both the sankranti (ingress) date and the target date are converted to local time,
+    and simple calendar day counting is used.
+    
+    Args:
+        jd_ut: Julian Day in Universal Time (UT)
+        place: Place tuple with (lat, lon, timezone)
+    """
+    # Use local timezone from place tuple for Pravishte calculation
+    local_tz_offset = place.timezone
+    
+    # Get sun's current sidereal longitude (solar_longitude expects UT)
+    sun_long = sankranti.solar_longitude(jd_ut)
     current_rasi_index = int(sun_long / 30)  # 0-11
     
     # Find when sun entered current rashi (the degree at which this rashi starts)
     target_long = current_rasi_index * 30  # e.g., Aries=0, Taurus=30, etc.
     
-    # Search backwards to find the exact ingress time
+    # Search backwards to find the exact ingress time (in UT)
     def func(t):
         s = sankranti.solar_longitude(t)
         # Handle wrap-around for Aries (0 degrees)
@@ -223,15 +341,20 @@ def get_pravishte(jd, place):
     
     # Search backwards up to 32 days
     try:
-        ingress_jd = sankranti.bisection_search(func, jd - 32, jd)
+        ingress_jd_ut = sankranti.bisection_search(func, jd_ut - 32, jd_ut)
     except:
         # If search fails, estimate based on average sun motion (~1 degree/day)
         degrees_into_sign = sun_long - target_long
-        ingress_jd = jd - degrees_into_sign
+        ingress_jd_ut = jd_ut - degrees_into_sign
     
-    # Calculate days since ingress
-    ingress_date = sankranti.jd_to_gregorian(ingress_jd + tz/24.0)
-    current_date = sankranti.jd_to_gregorian(jd + tz/24.0)
+    # Convert UT to local timezone to get correct dates
+    ingress_local_jd = ingress_jd_ut + local_tz_offset / 24.0
+    current_local_jd = jd_ut + local_tz_offset / 24.0
+    
+    ingress_date = sankranti.jd_to_gregorian(ingress_local_jd)
+    current_date = sankranti.jd_to_gregorian(current_local_jd)
+    
+    # Simple calendar day counting in local timezone
     d1 = datetime.date(ingress_date[0], ingress_date[1], ingress_date[2])
     d2 = datetime.date(current_date[0], current_date[1], current_date[2])
     
@@ -345,10 +468,10 @@ class PanchangCalculator:
         # accounting for months before Chaitra, so we just use a constant offset of 11
         saka_cycle_idx = (saka + 11) % 60
         
-        # Vikram Samvat - Use constant offset of 9 for 60-year cycle name
-        # The year number (vikram) already accounts for Hindu New Year transition
-        # 2080 -> Anala (49), 2081 -> Pingala (50), etc.
-        vikram_cycle_idx = (vikram + 9) % 60
+        # Vikram Samvat - Use dynamic offset that accounts for Kshaya/Adhika years
+        # The 60-year Brihaspati cycle "slips" relative to calendar years because
+        # Jupiter's ~11.86 year period doesn't exactly match 12 years
+        vikram_cycle_idx = get_vikram_samvatsara_index(vikram)
         
         # Gujarati Samvat
         gujarati_cycle_idx = (gujarati + 8) % 60
@@ -521,15 +644,16 @@ class PanchangCalculator:
         else:
             result['Karana'] = "No karana data"
         
-        # Pravishte - should use sunrise JD for consistency with panchang tradition
-        sunrise_jd = sr_info[0]  # Use sunrise JD (local)
-        result['Pravishte/Gate'] = get_pravishte(sunrise_jd, place)
+        # Pravishte - should use sunrise JD in UT for consistency with panchang tradition
+        # sr_info[0] is local JD (rise + tz/24), so we need to convert back to UT
+        sunrise_jd_local = sr_info[0]
+        sunrise_jd_ut = sunrise_jd_local - info_timezone / 24.0
+        result['Pravishte/Gate'] = get_pravishte(sunrise_jd_ut, place)
         
         # Signs - use sunrise positions (panchang tradition)
         # Note: Must use UT sunrise like nakshatra() does for consistency
-        sunrise_ut = sunrise_jd - info_timezone / 24.0
-        result['Sunsign'] = RASHI_NAMES[int(sankranti.solar_longitude(sunrise_ut)/30)]['english']
-        result['Moonsign'] = RASHI_NAMES[int(sankranti.lunar_longitude(sunrise_ut)/30)]['english']
+        result['Sunsign'] = RASHI_NAMES[int(sankranti.solar_longitude(sunrise_jd_ut)/30)]['english']
+        result['Moonsign'] = RASHI_NAMES[int(sankranti.lunar_longitude(sunrise_jd_ut)/30)]['english']
         
         # Kalams
         rk = sankranti.rahu_kalam(jd_midnight, place)
@@ -647,8 +771,10 @@ class PanchangCalculator:
                 m = sankranti.lunar_longitude(t)
                 target = nak_num * (360/27.0)
                 return sankranti.norm180(m - target)
-            # Search for nakshatra end (could be after next sunrise)
-            n_end_jd = sankranti.bisection_search(nak_end_dist, sunrise_jd_ut, sunrise_jd_ut + 2.0)
+            # Search for nakshatra end - limit to 1.2 days to avoid finding
+            # the wrong zero crossing when moon wraps around 360°
+            # A nakshatra typically spans ~1 day, so 1.2 days is sufficient
+            n_end_jd = sankranti.bisection_search(nak_end_dist, sunrise_jd_ut, sunrise_jd_ut + 1.2)
         
         # Calculate for sunrise nakshatra AND the next one if it starts within the day
         nakshatras_to_calculate = [{
@@ -708,14 +834,19 @@ class PanchangCalculator:
             # Panchang day = current sunrise to next sunrise
             next_sunrise_approx = sunrise_jd_ut + 1.0
             
-            # Include Varjyam only if it starts after current sunrise and before next sunrise
-            if v_s_ut >= sunrise_jd_ut and v_s_ut < next_sunrise_approx:
+            # Minimum duration threshold (5 minutes in days)
+            MIN_DURATION = 5.0 / (24 * 60)  # 5 minutes
+            
+            # Include Varjyam only if it starts after current sunrise, before next sunrise,
+            # and has meaningful duration
+            if v_s_ut >= sunrise_jd_ut and v_s_ut < next_sunrise_approx and v_duration_days >= MIN_DURATION:
                 v_start_time = jd_to_time_12hr(v_s_ut, info_timezone, ref_date)
                 v_end_time = jd_to_time_12hr(v_e_ut, info_timezone, ref_date)
                 varjyam_periods.append(f"{v_start_time} to {v_end_time}")
             
-            # Include Amrit Kalam only if it starts after current sunrise and before next sunrise
-            if a_s_ut >= sunrise_jd_ut and a_s_ut < next_sunrise_approx:
+            # Include Amrit Kalam only if it starts after current sunrise, before next sunrise,
+            # and has meaningful duration
+            if a_s_ut >= sunrise_jd_ut and a_s_ut < next_sunrise_approx and a_duration_days >= MIN_DURATION:
                 a_start_time = jd_to_time_12hr(a_s_ut, info_timezone, ref_date)
                 a_end_time = jd_to_time_12hr(a_e_ut, info_timezone, ref_date)
                 amrit_periods.append(f"{a_start_time} to {a_end_time}")
