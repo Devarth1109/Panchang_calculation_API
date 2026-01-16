@@ -9,7 +9,7 @@ from choghadiya_calculator import ChoghadiyaCalculator
 app = FastAPI(
     title="Panchang & Choghadiya API", 
     description="API to calculate Hindu Panchang variables and Choghadiya muhurta", 
-    version="1.1"
+    version="1.2"
 )
 
 # Load cities once on startup
@@ -19,6 +19,8 @@ CHOG_CALC = ChoghadiyaCalculator()
 
 class PanchangRequest(BaseModel):
     city: Optional[str] = None
+    state: Optional[str] = None
+    country: Optional[str] = None
     lat: Optional[float] = None
     lon: Optional[float] = None
     tz: Optional[float] = None
@@ -31,11 +33,13 @@ class PanchangRequest(BaseModel):
 
 @app.get("/")
 def read_root():
-    return {"message": "Welcome to Panchang APIs. Use /panchang endpoint."}
+    return {"message": "Welcome to Panchang APIs. Use /panchang or /choghadiya endpoints."}
 
 @app.get("/panchang")
 def get_panchang(
     city: Optional[str] = Query(None, description="City name"),
+    state: Optional[str] = Query(None, description="State/Province name"),
+    country: Optional[str] = Query(None, description="Country name or country code"),
     lat: Optional[float] = Query(None, description="Latitude"),
     lon: Optional[float] = Query(None, description="Longitude"),
     tz: Optional[float] = Query(None, description="Timezone Offset"),
@@ -58,14 +62,26 @@ def get_panchang(
     final_lon = lon
     final_tz = tz
     location_name = city or "Custom Coordinates"
+    location_details = {}
 
-    # City Lookup
+    # City Lookup with state and country filtering
     if city:
-        found_name, city_data = find_city(CITIES_DB, city)
+        found_name, city_data = find_city(CITIES_DB, city, state, country)
         if city_data:
             location_name = found_name
-            if final_lat is None: final_lat = city_data.get('latitude')
-            if final_lon is None: final_lon = city_data.get('longitude')
+            
+            # Store location details
+            location_details = {
+                'city': city_data.get('city'),
+                'state': city_data.get('stateName'),
+                'country': city_data.get('countryName'),
+                'countryCode': city_data.get('countryCode')
+            }
+            
+            if final_lat is None: 
+                final_lat = city_data.get('latitude')
+            if final_lon is None: 
+                final_lon = city_data.get('longitude')
             
             if final_tz is None:
                 tz_str = city_data.get('timezone')
@@ -75,7 +91,13 @@ def get_panchang(
                     final_tz = 5.5 # Default fallback
         else:
             if final_lat is None or final_lon is None:
-                 raise HTTPException(status_code=404, detail=f"City '{city}' not found and no coordinates provided.")
+                error_msg = f"City '{city}' not found"
+                if state:
+                    error_msg += f" in state '{state}'"
+                if country:
+                    error_msg += f" in country '{country}'"
+                error_msg += " and no coordinates provided."
+                raise HTTPException(status_code=404, detail=error_msg)
     
     # Fallback default (New Delhi)
     if final_lat is None: final_lat = 28.6139
@@ -85,13 +107,29 @@ def get_panchang(
     try:
         results = CALC.calculate(year, month, day, hour, minute, second, final_lat, final_lon, final_tz)
         
+        # Build comprehensive location info
+        location_info = location_name
+        if location_details:
+            parts = [location_details.get('city')]
+            if location_details.get('state'):
+                parts.append(location_details.get('state'))
+            if location_details.get('country'):
+                parts.append(location_details.get('country'))
+            location_info = ", ".join(filter(None, parts))
+        
         # Add metadata to response
         response = {
             "meta": {
-                "location": location_name,
+                "location": location_info,
+                "city": location_details.get('city') if location_details else city,
+                "state": location_details.get('state') if location_details else state,
+                "country": location_details.get('country') if location_details else country,
+                "countryCode": location_details.get('countryCode') if location_details else None,
                 "latitude": final_lat,
                 "longitude": final_lon,
                 "timezone_offset": final_tz,
+                "date": f"{year}-{month:02d}-{day:02d}",
+                "time": f"{hour:02d}:{minute:02d}:{second:02d}",
                 "timestamp": f"{year}-{month:02d}-{day:02d} {hour:02d}:{minute:02d}:{second:02d}"
             },
             "data": results
@@ -104,6 +142,8 @@ def get_panchang(
 @app.get("/choghadiya")
 def get_choghadiya(
     city: Optional[str] = Query(None, description="City name"),
+    state: Optional[str] = Query(None, description="State/Province name"),
+    country: Optional[str] = Query(None, description="Country name or country code"),
     lat: Optional[float] = Query(None, description="Latitude"),
     lon: Optional[float] = Query(None, description="Longitude"),
     tz: Optional[float] = Query(None, description="Timezone Offset"),
@@ -121,15 +161,27 @@ def get_choghadiya(
     final_lon = lon
     final_tz = tz
     location_name = city or "Custom Coordinates"
+    location_details = {}
     tz_name = None
 
-    # City Lookup
+    # City Lookup with state and country filtering
     if city:
-        found_name, city_data = find_city(CITIES_DB, city)
+        found_name, city_data = find_city(CITIES_DB, city, state, country)
         if city_data:
             location_name = found_name
-            if final_lat is None: final_lat = city_data.get('latitude')
-            if final_lon is None: final_lon = city_data.get('longitude')
+            
+            # Store location details
+            location_details = {
+                'city': city_data.get('city'),
+                'state': city_data.get('stateName'),
+                'country': city_data.get('countryName'),
+                'countryCode': city_data.get('countryCode')
+            }
+            
+            if final_lat is None: 
+                final_lat = city_data.get('latitude')
+            if final_lon is None: 
+                final_lon = city_data.get('longitude')
             
             if final_tz is None:
                 tz_name = city_data.get('timezone')
@@ -139,7 +191,13 @@ def get_choghadiya(
                     final_tz = 5.5  # Default fallback
         else:
             if final_lat is None or final_lon is None:
-                raise HTTPException(status_code=404, detail=f"City '{city}' not found and no coordinates provided.")
+                error_msg = f"City '{city}' not found"
+                if state:
+                    error_msg += f" in state '{state}'"
+                if country:
+                    error_msg += f" in country '{country}'"
+                error_msg += " and no coordinates provided."
+                raise HTTPException(status_code=404, detail=error_msg)
     
     # Fallback default (New Delhi)
     if final_lat is None: final_lat = 28.6139
@@ -149,6 +207,16 @@ def get_choghadiya(
     try:
         # Calculate choghadiya
         results = CHOG_CALC.calculate(year, month, day, final_lat, final_lon, final_tz, tz_name)
+        
+        # Build comprehensive location info
+        location_info = location_name
+        if location_details:
+            parts = [location_details.get('city')]
+            if location_details.get('state'):
+                parts.append(location_details.get('state'))
+            if location_details.get('country'):
+                parts.append(location_details.get('country'))
+            location_info = ", ".join(filter(None, parts))
         
         # Build day choghadiya times list (8 periods)
         day_choghadiya_times = []
@@ -167,10 +235,15 @@ def get_choghadiya(
         # Build response in desired format
         response = {
             "meta": {
-                "location": location_name,
+                "location": location_info,
+                "city": location_details.get('city') if location_details else city,
+                "state": location_details.get('state') if location_details else state,
+                "country": location_details.get('country') if location_details else country,
+                "countryCode": location_details.get('countryCode') if location_details else None,
                 "latitude": final_lat,
                 "longitude": final_lon,
                 "timezone_offset": final_tz,
+                "date": f"{year}-{month:02d}-{day:02d}",
                 "timestamp": f"{year}-{month:02d}-{day:02d}"
             },
             "choghadiya": {
@@ -179,7 +252,7 @@ def get_choghadiya(
                 "night_choghadiya_start": results["sunset"],
                 "night_choghadiya_times": night_choghadiya_times
             },
-            "Note": f"All timings are represented in 12-hour notation in local time of {location_name} with DST adjustment (if applicable). Hours which are past midnight are suffixed with next day date. In Panchang day starts and ends with sunrise."
+            "Note": f"All timings are represented in 12-hour notation in local time of {location_info} with DST adjustment (if applicable). Hours which are past midnight are suffixed with next day date. In Panchang day starts and ends with sunrise."
         }
         return response
     except Exception as e:
