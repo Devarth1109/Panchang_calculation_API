@@ -1,16 +1,16 @@
 from fastapi import FastAPI, HTTPException, Query
-from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional
 import datetime
 from city_utils import load_cities, find_city, get_timezone_offset
 from panchang_calculator import PanchangCalculator
 from choghadiya_calculator import ChoghadiyaCalculator
 from marathi_panchang_calculator import MarathiPanchangCalculator
+from malyalam_panchang_calculator import MalayalamPanchangCalculator
 
 app = FastAPI(
     title="Panchang & Choghadiya API", 
-    description="API to calculate Hindu Panchang variables, Choghadiya muhurta, and Marathi Panchang", 
-    version="1.3"
+    description="API to calculate Hindu Panchang variables, Choghadiya muhurta, Marathi Panchang, and Malayalam Panchang", 
+    version="1.4"
 )
 
 # Load calculators once on startup
@@ -18,20 +18,7 @@ CITIES_DB = load_cities()
 CALC = PanchangCalculator()
 CHOG_CALC = ChoghadiyaCalculator()
 MARATHI_CALC = MarathiPanchangCalculator()
-
-class PanchangRequest(BaseModel):
-    city: Optional[str] = None
-    state: Optional[str] = None
-    country: Optional[str] = None
-    lat: Optional[float] = None
-    lon: Optional[float] = None
-    tz: Optional[float] = None
-    year: Optional[int] = None
-    month: Optional[int] = None
-    day: Optional[int] = None
-    hour: Optional[int] = None
-    minute: Optional[int] = None
-    second: Optional[int] = 0
+MALAYALAM_CALC = MalayalamPanchangCalculator()
 
 @app.get("/")
 def read_root():
@@ -40,7 +27,8 @@ def read_root():
         "endpoints": {
             "/panchang": "Hindu Panchang calculations",
             "/choghadiya": "Choghadiya muhurta timings",
-            "/marathi-panchang": "Marathi Panchang (Shaka Samvat based)"
+            "/marathi-panchang": "Marathi Panchang (Shaka Samvat based)",
+            "/malayalam-panchang": "Malayalam Panchang (Kollam Era based)"
         }
     }
 
@@ -366,6 +354,114 @@ def get_marathi_panchang(
                 "time": f"{hour:02d}:{minute:02d}:{second:02d}",
                 "timestamp": f"{year}-{month:02d}-{day:02d} {hour:02d}:{minute:02d}:{second:02d}",
                 "calendar_system": "Marathi Panchang (Shaka Samvat, Amanta)"
+            },
+            "data": results
+        }
+        return response
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/malayalam-panchang")
+def get_malayalam_panchang(
+    city: Optional[str] = Query(None, description="City name"),
+    state: Optional[str] = Query(None, description="State/Province name"),
+    country: Optional[str] = Query(None, description="Country name or country code"),
+    lat: Optional[float] = Query(None, description="Latitude"),
+    lon: Optional[float] = Query(None, description="Longitude"),
+    tz: Optional[float] = Query(None, description="Timezone Offset"),
+    year: Optional[int] = Query(None, description="Year"),
+    month: Optional[int] = Query(None, description="Month"),
+    day: Optional[int] = Query(None, description="Day"),
+    hour: Optional[int] = Query(None, description="Hour"),
+    minute: Optional[int] = Query(None, description="Minute"),
+    second: Optional[int] = Query(0, description="Second")
+):
+    """
+    Malayalam Panchang endpoint - calculates panchang according to Kerala calendar tradition
+    Uses Kollam Era (Kollavarsham) and Solar months (Mesha Sankranti system)
+    """
+    # Default to current time if date/time not provided
+    now = datetime.datetime.now()
+    if year is None: year = now.year
+    if month is None: month = now.month
+    if day is None: day = now.day
+    if hour is None: hour = now.hour
+    if minute is None: minute = now.minute
+    
+    final_lat = lat
+    final_lon = lon
+    final_tz = tz
+    location_name = city or "Custom Coordinates"
+    location_details = {}
+
+    # City Lookup with state and country filtering (with GeoNames API fallback)
+    if city:
+        found_name, city_data = find_city(CITIES_DB, city, state, country)
+        if city_data:
+            location_name = found_name
+            
+            location_details = {
+                'city': city_data.get('city'),
+                'state': city_data.get('stateName'),
+                'country': city_data.get('countryName'),
+                'countryCode': city_data.get('countryCode')
+            }
+            
+            if final_lat is None: 
+                final_lat = city_data.get('latitude')
+            if final_lon is None: 
+                final_lon = city_data.get('longitude')
+            
+            if final_tz is None:
+                tz_str = city_data.get('timezone')
+                if tz_str:
+                    final_tz = get_timezone_offset(tz_str, year, month, day, hour, minute)
+                else:
+                    final_tz = 5.5
+        else:
+            if final_lat is None or final_lon is None:
+                error_msg = f"City '{city}' not found"
+                if state:
+                    error_msg += f" in state '{state}'"
+                if country:
+                    error_msg += f" in country '{country}'"
+                error_msg += ". Could not find in local database or GeoNames API. Please provide coordinates."
+                raise HTTPException(status_code=404, detail=error_msg)
+    
+    # Fallback default (Thiruvananthapuram, Kerala)
+    if final_lat is None: final_lat = 8.5241
+    if final_lon is None: final_lon = 76.9366
+    if final_tz is None: final_tz = 5.5
+    
+    try:
+        results = MALAYALAM_CALC.calculate(year, month, day, hour, minute, second, final_lat, final_lon, final_tz)
+        
+        # Build comprehensive location info
+        location_info = location_name
+        if location_details:
+            parts = [location_details.get('city')]
+            if location_details.get('state'):
+                parts.append(location_details.get('state'))
+            if location_details.get('country'):
+                parts.append(location_details.get('country'))
+            location_info = ", ".join(filter(None, parts))
+        
+        # Add metadata to response
+        response = {
+            "meta": {
+                "location": location_info,
+                "city": location_details.get('city') if location_details else city,
+                "state": location_details.get('state') if location_details else state,
+                "country": location_details.get('country') if location_details else country,
+                "countryCode": location_details.get('countryCode') if location_details else None,
+                "latitude": final_lat,
+                "longitude": final_lon,
+                "timezone_offset": final_tz,
+                "date": f"{year}-{month:02d}-{day:02d}",
+                "time": f"{hour:02d}:{minute:02d}:{second:02d}",
+                "timestamp": f"{year}-{month:02d}-{day:02d} {hour:02d}:{minute:02d}:{second:02d}",
+                "calendar_system": "Malayalam Panchang (Kollam Era, Solar Months)"
             },
             "data": results
         }

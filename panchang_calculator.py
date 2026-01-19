@@ -4,7 +4,7 @@ from math import ceil
 import datetime
 
 # Import data dictionaries
-from religious_data import TITHI_NAMES, PAKSHA, NAKSHATRA_NAMES, YOGA_NAMES, RASHI_NAMES, VARA_NAMES, SAMVAT_YEAR_NAMES, KARANA_NAMES
+from religious_data import TITHI_NAMES, NAKSHATRA_NAMES, YOGA_NAMES, RASHI_NAMES, VARA_NAMES, SAMVAT_YEAR_NAMES, KARANA_NAMES
 
 # =============================================================================
 # DATA TABLES FROM calculation_formula.txt
@@ -253,29 +253,6 @@ def format_time_range_12hr(start_dms, end_dms, ref_date=None):
     
     return f"{start_str} to {end_str}"
 
-def format_dms_time(dms_list):
-    """Converts [H, M, S] list to HH:MM:SS string."""
-    h, m, s = dms_list
-    day_offset = 0
-    if h >= 24:
-        day_offset = int(h // 24)
-        h = h % 24
-    
-    time_str = f"{int(h):02d}:{int(m):02d}:{int(s):02d}"
-    if day_offset > 0:
-        time_str += f" (+{day_offset})"
-    return time_str
-
-def jd_to_time_str(jd_ut, tz):
-    """Converts JD (UT) to Local Time String HH:MM:SS."""
-    local_jd = jd_ut + (tz / 24.0)
-    g = sankranti.jd_to_gregorian(local_jd) # (y,m,d,h,min,s)
-    h_flt = g[3] + g[4]/60.0 + g[5]/3600.0
-    h = int(h_flt)
-    m = int((h_flt - h) * 60)
-    s = int(((h_flt - h) * 60 - m) * 60)
-    return f"{h:02d}:{m:02d}:{s:02d}"
-
 def jd_to_time_12hr(jd_ut, tz, ref_date):
     """Converts JD (UT) to 12-hour format with AM/PM and date if needed."""
     local_jd = jd_ut + (tz / 24.0)
@@ -360,18 +337,6 @@ def get_pravishte(jd_ut, place):
     
     # Return days since sun entered current rashi (1-indexed)
     return (d2 - d1).days + 1
-
-def find_end_time(jd, func_current, current_val, steps_per_circle):
-    """
-    Finds when the function changes value (integer part + 1).
-    func_current: returns floating point 'index' or 'phase'.
-    current_val: int (current index).
-    """
-    target = current_val # e.g. Tithi 1 -> End is when value becomes 2 (or wrap)
-    # Tithi: 1..30. Phase 0..360.
-    # Tithi = ceil(phase/12). 
-    # Logic: Finding when phase crosses (current_val * step).
-    pass
 
 class PanchangCalculator:
     def __init__(self):

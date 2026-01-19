@@ -1,6 +1,6 @@
 import sankranti
 from sankranti import Date, Place, gregorian_to_jd, jd_to_gregorian, to_dms, swe
-from math import ceil, floor
+from math import ceil
 import datetime
 
 # Import data dictionaries
@@ -106,30 +106,6 @@ def format_time_range_12hr(start_dms, end_dms, ref_date=None):
 
 def jd_to_time_12hr(jd_ut, tz, ref_date):
     """Converts JD (UT) to 12-hour format with AM/PM and date if needed."""
-    local_jd = jd_ut + tz / 24.0
-    g = sankranti.jd_to_gregorian(local_jd)
-    h_flt = g[3] + g[4]/60.0 + g[5]/3600.0
-    h = int(h_flt)
-    m = int((h_flt - h) * 60)
-    
-    current_date = datetime.date(g[0], g[1], g[2])
-    day_offset = (current_date - ref_date).days
-    
-    period = "AM" if h < 12 else "PM"
-    h_12 = h if h <= 12 else h - 12
-    if h_12 == 0:
-        h_12 = 12
-    
-    time_str = f"{int(h_12):02d}:{int(m):02d} {period}"
-    
-    if day_offset > 0:
-        time_str += f", {MONTH_NAMES_SHORT[current_date.month-1]} {current_date.day:02d}"
-    
-    return time_str
-
-
-def jd_to_time_12hr_varjyam(jd_ut, tz, ref_date):
-    """Converts JD (UT) to 12-hour format for Varjyam/Amrit Kalam display."""
     local_jd = jd_ut + tz / 24.0
     g = sankranti.jd_to_gregorian(local_jd)
     h_flt = g[3] + g[4]/60.0 + g[5]/3600.0
@@ -497,14 +473,14 @@ class MarathiPanchangCalculator:
             
             # Include Varjyam only if it starts after current sunrise and before next sunrise
             if v_s_ut >= sunrise_jd_ut and v_s_ut < next_sunrise_approx and v_duration_days >= MIN_DURATION:
-                v_start_time = jd_to_time_12hr_varjyam(v_s_ut, info_timezone, ref_date)
-                v_end_time = jd_to_time_12hr_varjyam(v_e_ut, info_timezone, ref_date)
+                v_start_time = jd_to_time_12hr(v_s_ut, info_timezone, ref_date)
+                v_end_time = jd_to_time_12hr(v_e_ut, info_timezone, ref_date)
                 varjyam_periods.append(f"{v_start_time} to {v_end_time}")
             
             # Include Amrit Kalam only if it starts after current sunrise and before next sunrise
             if a_s_ut >= sunrise_jd_ut and a_s_ut < next_sunrise_approx and a_duration_days >= MIN_DURATION:
-                a_start_time = jd_to_time_12hr_varjyam(a_s_ut, info_timezone, ref_date)
-                a_end_time = jd_to_time_12hr_varjyam(a_e_ut, info_timezone, ref_date)
+                a_start_time = jd_to_time_12hr(a_s_ut, info_timezone, ref_date)
+                a_end_time = jd_to_time_12hr(a_e_ut, info_timezone, ref_date)
                 amrit_periods.append(f"{a_start_time} to {a_end_time}")
         
         # Join multiple periods with semicolon

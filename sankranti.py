@@ -13,35 +13,13 @@ sidereal_year = 365.256360417   # From WolframAlpha
 _rise_flags = 0
 
 # namah suryaya chandraya mangalaya ... rahuve ketuve namah
-swe.RAHU = swe.MEAN_NODE # Rahu = either MEAN_NODE or swe.TRUE_NODE
-swe.KETU = swe.PLUTO  # I've mapped Pluto to Ketu
-planet_list = [swe.SUN, swe.MOON, swe.MARS, swe.MERCURY, swe.JUPITER,
-               swe.VENUS, swe.SATURN, swe.MEAN_NODE, # Rahu = MEAN_NODE
-               swe.KETU, swe.URANUS, swe.NEPTUNE ]
+swe.RAHU = swe.MEAN_NODE
 
-revati_359_50 = lambda: swe.set_sid_mode(swe.SIDM_USER, 1926892.343164331, 0)
-galc_cent_mid_mula = lambda: swe.set_sid_mode(swe.SIDM_USER, 1922011.128853056, 0)
-
-# Possible ayanamas
-# swe.SIDM_ALDEBARAN_15TAU     swe.SIDM_BABYL_HUBER         swe.SIDM_DJWHAL_KHUL         swe.SIDM_J2000               swe.SIDM_SASSANIAN             swe.SIDM_TRUE_CITRA
-# swe.SIDM_ARYABHATA           swe.SIDM_BABYL_KUGLER1       swe.SIDM_FAGAN_BRADLEY       swe.SIDM_JN_BHASIN           swe.SIDM_SS_CITRA              swe.SIDM_TRUE_REVATI
-# swe.SIDM_ARYABHATA_MSUN      swe.SIDM_BABYL_KUGLER2       swe.SIDM_GALCENT_0SAG        swe.SIDM_KRISHNAMURTI        swe.SIDM_SS_REVATI             swe.SIDM_USER
-# swe.SIDM_B1950               swe.SIDM_BABYL_KUGLER3       swe.SIDM_HIPPARCHOS          swe.SIDM_LAHIRI              swe.SIDM_SURYASIDDHANTA        swe.SIDM_USHASHASHI
-# swe.SIDM_BABYL_ETPSC         swe.SIDM_DELUCE              swe.SIDM_J1900               swe.SIDM_RAMAN               swe.SIDM_SURYASIDDHANTA_MSUN   swe.SIDM_YUKTESHWAR
+# Ayanamsa configuration - Using Lahiri (Chitrapaksha) for sidereal calculations
 set_ayanamsa_mode = lambda: swe.set_sid_mode(swe.SIDM_LAHIRI)
 reset_ayanamsa_mode = lambda: swe.set_sid_mode(swe.SIDM_FAGAN_BRADLEY)
 
-# Temporary function
-def get_planet_name(planet):
-  names = { swe.SUN: 'Surya', swe.MOON: 'Candra', swe.KUJA: 'Mangala',
-            swe.MERCURY: 'Budha', swe.JUPITER: 'Guru', swe.VENUS: 'Sukra',
-            swe.SATURN: 'Sani', swe.RAHU: 'Rahu', swe.KETU: 'Ketu', swe.PLUTO: 'Ketu'}
-  return names[planet]
-
-# Convert 23d 30' 30" to 23.508333 degrees
-from_dms = lambda degs, mins, secs = 0: degs + mins/60 + secs/3600
-
-# the inverse
+# Convert degrees to [degrees, minutes, seconds] format
 def to_dms_prec(deg):
   d = int(deg)
   mins = (deg - d) * 60
@@ -64,33 +42,13 @@ def unwrap_angles(angles):
   return result
 
 # Make angle lie between [-180, 180) instead of [0, 360)
-norm180 = lambda angle: (angle - 360) if angle >= 180 else angle;
+norm180 = lambda angle: (angle - 360) if angle >= 180 else angle
 
 # Make angle lie between [0, 360)
 norm360 = lambda angle: angle % 360
 
-# Ketu is always 180° after Rahu, so same coordinates but different constellations
-# i.e if Rahu is in Pisces, Ketu is in Virgo etc
-ketu = lambda rahu: (rahu + 180) % 360
-
-# Set env variable SE_EPHE_PATH to /usr/share/libswe/ephe
+# Set ephemeris path for Swiss Ephemeris
 swe.set_ephe_path('/usr/share/libswe/ephe')
-init_swisseph = lambda: None
-
-def function(point):
-    swe.set_sid_mode(swe.SIDM_USER, point, 0.0)
-    #swe.set_sid_mode(swe.SIDM_LAHIRI)
-    # Place Revati at 359°50'
-    #fval = norm180(swe.fixstar_ut("Revati", point, flags = swe.FLG_SWIEPH | swe.FLG_SIDEREAL)[0][0]) - ((359 + 49/60 + 59/3600) - 360)
-    # Place Revati at 0°0'0"
-    #fval = norm180(swe.fixstar_ut("Revati", point, flags = swe.FLG_SWIEPH | swe.FLG_SIDEREAL)[0][0])
-    # Place Aldebaran in middle of Rohini (Rohini paksha ayanamsha)
-    #fval = norm180(swe.fixstar_ut("Aldebaran", jd,  swe.FLG_SIDEREAL)[0][0] - (46+40/60))
-    # Place Citra at 180°
-    fval = swe.fixstar_ut("Citra", point, flags = swe.FLG_SWIEPH | swe.FLG_SIDEREAL)[0][0] - (180)
-    # Place Pushya (delta Cancri) at 106°
-    # fval = swe.fixstar_ut(",deCnc", point, flags = swe.FLG_SWIEPH | swe.FLG_SIDEREAL)[0][0] - (106)
-    return fval
 
 def bisection_search(func, start, stop):
   left = start
@@ -150,18 +108,6 @@ def local_time_to_jdut1(year, month, day, hour = 0, minutes = 0, seconds = 0, ti
   # BUG in pyswisseph: replace 0 by s
   jd_et, jd_ut1 = swe.utc_to_jd(y, m, d, h, mnt, 0, cal = swe.GREG_CAL)
   return jd_ut1
-
-def nakshatra_pada(longitude):
-  """Gives nakshatra (1..27) and paada (1..4) in which given longitude lies"""
-  # 27 nakshatras span 360°
-  one_star = (360 / 27)  # = 13°20'
-  # Each nakshatra has 4 padas, so 27 x 4 = 108 padas in 360°
-  one_pada = (360 / 108) # = 3°20'
-  quotient = int(longitude / one_star)
-  reminder = (longitude - quotient * one_star)
-  pada = int(reminder / one_pada)
-  # convert 0..26 to 1..27 and 0..3 to 1..4
-  return [1 + quotient, 1 + pada]
 
 def sidereal_longitude(jd, planet, tropical = False):
   """Computes nirayana (sidereal) longitude of given planet on jd"""
@@ -486,45 +432,6 @@ def lunar_phase(jd):
   moon_phase = (lunar_long - solar_long) % 360
   return moon_phase
 
-def samvatsara(jd, maasa_num):
-  kali = elapsed_year(jd, maasa_num)[0]
-  # Change 14 to 0 for North Indian tradition
-  # See the function "get_Jovian_Year_name_south" in pancanga.pl
-  if kali >= 4009:    kali = (kali - 14) % 60
-  samvat = (kali + 27 + int((kali * 211 - 108) / 18000)) % 60
-  return samvat
-
-def ritu(masa_num):
-  """0 = Vasanta,...,5 = Shishira"""
-  return (masa_num - 1) // 2
-
-def day_duration(jd, place):
-  srise = sunrise(jd, place)[0]  # julian day num
-  sset = sunset(jd, place)[0]    # julian day num
-  diff = (sset - srise) * 24     # In hours
-  return [diff, to_dms(diff)]
-
-# The day duration is divided into 8 parts
-# Similarly night duration
-def gauri_chogadiya(jd, place):
-  lat, lon, tz = place
-  # tz already extracted from tuple above
-  srise = swe.rise_trans(jd - tz/24, swe.SUN, geopos = (lon, lat, 0), rsmi = _rise_flags + swe.CALC_RISE)[1][0]
-  sset = swe.rise_trans(jd - tz/24, swe.SUN, geopos = (lon, lat, 0), rsmi = _rise_flags + swe.CALC_SET)[1][0]
-  day_dur = (sset - srise)
-
-  end_times = []
-  for i in range(1, 9):
-    end_times.append(to_dms((srise + (i * day_dur) / 8 - jd) * 24 + tz))
-
-  # Night duration = time from today's sunset to tomorrow's sunrise
-  srise = swe.rise_trans((jd + 1) - tz/24, swe.SUN, geopos = (lon, lat, 0), rsmi = _rise_flags + swe.CALC_RISE)[1][0]
-  night_dur = (srise - sset)
-  for i in range(1, 9):
-    end_times.append(to_dms((sset + (i * night_dur) / 8 - jd) * 24 + tz))
-
-  return end_times
-
 def trikalam(jd, place, option='rahu'):
   lat, lon, tz = place
   # tz already extracted from tuple above
@@ -609,75 +516,3 @@ def abhijit_muhurta(jd, place):
 
   # to local time
   return [(start_time - jd) * 24 + tz, (end_time - jd) * 24 + tz]
-
-# 'jd' can be any time: ex, 2015-09-19 14:20 UTC
-# today = swe.julday(2015, 9, 19, 14 + 20./60)
-def planetary_positions(jd, place):
-  """Computes instantaneous planetary positions
-     (i.e., which celestial object lies in which constellation)
-
-     Also gives the nakshatra-pada division
-   """
-  tz = place[2] if isinstance(place, tuple) else place.timezone
-  jd_ut = jd - tz / 24.
-
-  positions = []
-  for planet in planet_list:
-    if planet != swe.KETU:
-      nirayana_long = sidereal_longitude(jd_ut, planet)
-    else: # Ketu
-      nirayana_long = ketu(sidereal_longitude(jd_ut, swe.RAHU))
-
-    # 12 zodiac signs span 360°, so each one takes 30°
-    # 0 = Mesha, 1 = Vrishabha, ..., 11 = Meena
-    constellation = int(nirayana_long / 30)
-    coordinates = to_dms(nirayana_long % 30)
-    positions.append([planet, constellation, coordinates, nakshatra_pada(nirayana_long)])
-
-  return positions
-
-def ascendant(jd, place):
-  """Lagna (=ascendant) calculation at any given time & place"""
-  lat, lon, tz = place
-  jd_utc = jd - (tz / 24.)
-  set_ayanamsa_mode() # needed for swe.houses_ex()
-
-  # returns two arrays, cusps and ascmc, where ascmc[0] = Ascendant
-  nirayana_lagna = swe.houses_ex(jd_utc, lat, lon, flags = swe.FLG_SIDEREAL)[1][0]
-  # 12 zodiac signs span 360°, so each one takes 30°
-  # 0 = Mesha, 1 = Vrishabha, ..., 11 = Meena
-  constellation = int(nirayana_lagna / 30)
-  coordinates = to_dms(nirayana_lagna % 30)
-
-  reset_ayanamsa_mode()
-  return [constellation, coordinates, nakshatra_pada(nirayana_lagna)]
-
-# http://www.oocities.org/talk2astrologer/LearnAstrology/Details/Navamsa.html
-# Useful for making D9 divisional chart
-def navamsa_from_long(longitude):
-  """Calculates the navamsa-sign in which given longitude falls
-  0 = Aries, 1 = Taurus, ..., 11 = Pisces
-  """
-  one_pada = (360 / (12 * 9))  # There are also 108 navamsas
-  one_sign = 12 * one_pada    # = 40 degrees exactly
-  signs_elapsed = longitude / one_sign
-  fraction_left = signs_elapsed % 1
-  return int(fraction_left * 12)
-
-def navamsa(jd, place):
-  """Calculates navamsa of all planets"""
-  tz = place[2] if isinstance(place, tuple) else place.timezone
-  jd_utc = jd - tz / 24.
-
-  positions = []
-  for planet in planet_list:
-    if planet != swe.KETU:
-      nirayana_long = sidereal_longitude(jd_utc, planet)
-    else: # Ketu
-      nirayana_long = ketu(sidereal_longitude(jd_utc, swe.RAHU))
-
-    positions.append([planet, navamsa_from_long(nirayana_long)])
-
-  return positions
-
-# Test functions and unused calculations removed for production build.
