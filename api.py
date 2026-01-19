@@ -5,17 +5,19 @@ import datetime
 from city_utils import load_cities, find_city, get_timezone_offset
 from panchang_calculator import PanchangCalculator
 from choghadiya_calculator import ChoghadiyaCalculator
+from marathi_panchang_calculator import MarathiPanchangCalculator
 
 app = FastAPI(
     title="Panchang & Choghadiya API", 
-    description="API to calculate Hindu Panchang variables and Choghadiya muhurta", 
-    version="1.2"
+    description="API to calculate Hindu Panchang variables, Choghadiya muhurta, and Marathi Panchang", 
+    version="1.3"
 )
 
-# Load cities once on startup
+# Load calculators once on startup
 CITIES_DB = load_cities()
 CALC = PanchangCalculator()
 CHOG_CALC = ChoghadiyaCalculator()
+MARATHI_CALC = MarathiPanchangCalculator()
 
 class PanchangRequest(BaseModel):
     city: Optional[str] = None
@@ -33,7 +35,14 @@ class PanchangRequest(BaseModel):
 
 @app.get("/")
 def read_root():
-    return {"message": "Welcome to Panchang APIs. Use /panchang or /choghadiya endpoints."}
+    return {
+        "message": "Welcome to Panchang APIs", 
+        "endpoints": {
+            "/panchang": "Hindu Panchang calculations",
+            "/choghadiya": "Choghadiya muhurta timings",
+            "/marathi-panchang": "Marathi Panchang (Shaka Samvat based)"
+        }
+    }
 
 @app.get("/panchang")
 def get_panchang(
@@ -70,7 +79,6 @@ def get_panchang(
         if city_data:
             location_name = found_name
             
-            # Store location details
             location_details = {
                 'city': city_data.get('city'),
                 'state': city_data.get('stateName'),
@@ -88,9 +96,8 @@ def get_panchang(
                 if tz_str:
                     final_tz = get_timezone_offset(tz_str, year, month, day, hour, minute)
                 else:
-                    final_tz = 5.5 # Default fallback
+                    final_tz = 5.5
         else:
-            # City not found in local database AND GeoNames API
             if final_lat is None or final_lon is None:
                 error_msg = f"City '{city}' not found"
                 if state:
@@ -171,7 +178,6 @@ def get_choghadiya(
         if city_data:
             location_name = found_name
             
-            # Store location details
             location_details = {
                 'city': city_data.get('city'),
                 'state': city_data.get('stateName'),
@@ -189,9 +195,8 @@ def get_choghadiya(
                 if tz_name:
                     final_tz = get_timezone_offset(tz_name, year, month, day, 12, 0)
                 else:
-                    final_tz = 5.5  # Default fallback
+                    final_tz = 5.5
         else:
-            # City not found in local database AND GeoNames API
             if final_lat is None or final_lon is None:
                 error_msg = f"City '{city}' not found"
                 if state:
@@ -255,6 +260,114 @@ def get_choghadiya(
                 "night_choghadiya_times": night_choghadiya_times
             },
             "Note": f"All timings are represented in 12-hour notation in local time of {location_info} with DST adjustment (if applicable). Hours which are past midnight are suffixed with next day date. In Panchang day starts and ends with sunrise."
+        }
+        return response
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/marathi-panchang")
+def get_marathi_panchang(
+    city: Optional[str] = Query(None, description="City name"),
+    state: Optional[str] = Query(None, description="State/Province name"),
+    country: Optional[str] = Query(None, description="Country name or country code"),
+    lat: Optional[float] = Query(None, description="Latitude"),
+    lon: Optional[float] = Query(None, description="Longitude"),
+    tz: Optional[float] = Query(None, description="Timezone Offset"),
+    year: Optional[int] = Query(None, description="Year"),
+    month: Optional[int] = Query(None, description="Month"),
+    day: Optional[int] = Query(None, description="Day"),
+    hour: Optional[int] = Query(None, description="Hour"),
+    minute: Optional[int] = Query(None, description="Minute"),
+    second: Optional[int] = Query(0, description="Second")
+):
+    """
+    Marathi Panchang endpoint - calculates panchang according to Marathi calendar tradition
+    Uses Shaka Samvat and Amanta (New Moon to New Moon) month system
+    """
+    # Default to current time if date/time not provided
+    now = datetime.datetime.now()
+    if year is None: year = now.year
+    if month is None: month = now.month
+    if day is None: day = now.day
+    if hour is None: hour = now.hour
+    if minute is None: minute = now.minute
+    
+    final_lat = lat
+    final_lon = lon
+    final_tz = tz
+    location_name = city or "Custom Coordinates"
+    location_details = {}
+
+    # City Lookup with state and country filtering (with GeoNames API fallback)
+    if city:
+        found_name, city_data = find_city(CITIES_DB, city, state, country)
+        if city_data:
+            location_name = found_name
+            
+            location_details = {
+                'city': city_data.get('city'),
+                'state': city_data.get('stateName'),
+                'country': city_data.get('countryName'),
+                'countryCode': city_data.get('countryCode')
+            }
+            
+            if final_lat is None: 
+                final_lat = city_data.get('latitude')
+            if final_lon is None: 
+                final_lon = city_data.get('longitude')
+            
+            if final_tz is None:
+                tz_str = city_data.get('timezone')
+                if tz_str:
+                    final_tz = get_timezone_offset(tz_str, year, month, day, hour, minute)
+                else:
+                    final_tz = 5.5
+        else:
+            if final_lat is None or final_lon is None:
+                error_msg = f"City '{city}' not found"
+                if state:
+                    error_msg += f" in state '{state}'"
+                if country:
+                    error_msg += f" in country '{country}'"
+                error_msg += ". Could not find in local database or GeoNames API. Please provide coordinates."
+                raise HTTPException(status_code=404, detail=error_msg)
+    
+    # Fallback default (Mumbai, Maharashtra)
+    if final_lat is None: final_lat = 19.0760
+    if final_lon is None: final_lon = 72.8777
+    if final_tz is None: final_tz = 5.5
+    
+    try:
+        results = MARATHI_CALC.calculate(year, month, day, hour, minute, second, final_lat, final_lon, final_tz)
+        
+        # Build comprehensive location info
+        location_info = location_name
+        if location_details:
+            parts = [location_details.get('city')]
+            if location_details.get('state'):
+                parts.append(location_details.get('state'))
+            if location_details.get('country'):
+                parts.append(location_details.get('country'))
+            location_info = ", ".join(filter(None, parts))
+        
+        # Add metadata to response
+        response = {
+            "meta": {
+                "location": location_info,
+                "city": location_details.get('city') if location_details else city,
+                "state": location_details.get('state') if location_details else state,
+                "country": location_details.get('country') if location_details else country,
+                "countryCode": location_details.get('countryCode') if location_details else None,
+                "latitude": final_lat,
+                "longitude": final_lon,
+                "timezone_offset": final_tz,
+                "date": f"{year}-{month:02d}-{day:02d}",
+                "time": f"{hour:02d}:{minute:02d}:{second:02d}",
+                "timestamp": f"{year}-{month:02d}-{day:02d} {hour:02d}:{minute:02d}:{second:02d}",
+                "calendar_system": "Marathi Panchang (Shaka Samvat, Amanta)"
+            },
+            "data": results
         }
         return response
     except Exception as e:
