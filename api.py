@@ -64,7 +64,7 @@ def get_panchang(
     location_name = city or "Custom Coordinates"
     location_details = {}
 
-    # City Lookup with state and country filtering
+    # City Lookup with state and country filtering (with GeoNames API fallback)
     if city:
         found_name, city_data = find_city(CITIES_DB, city, state, country)
         if city_data:
@@ -90,13 +90,14 @@ def get_panchang(
                 else:
                     final_tz = 5.5 # Default fallback
         else:
+            # City not found in local database AND GeoNames API
             if final_lat is None or final_lon is None:
                 error_msg = f"City '{city}' not found"
                 if state:
                     error_msg += f" in state '{state}'"
                 if country:
                     error_msg += f" in country '{country}'"
-                error_msg += " and no coordinates provided."
+                error_msg += ". Could not find in local database or GeoNames API. Please provide coordinates."
                 raise HTTPException(status_code=404, detail=error_msg)
     
     # Fallback default (New Delhi)
@@ -164,7 +165,7 @@ def get_choghadiya(
     location_details = {}
     tz_name = None
 
-    # City Lookup with state and country filtering
+    # City Lookup with state and country filtering (with GeoNames API fallback)
     if city:
         found_name, city_data = find_city(CITIES_DB, city, state, country)
         if city_data:
@@ -190,13 +191,14 @@ def get_choghadiya(
                 else:
                     final_tz = 5.5  # Default fallback
         else:
+            # City not found in local database AND GeoNames API
             if final_lat is None or final_lon is None:
                 error_msg = f"City '{city}' not found"
                 if state:
                     error_msg += f" in state '{state}'"
                 if country:
                     error_msg += f" in country '{country}'"
-                error_msg += " and no coordinates provided."
+                error_msg += ". Could not find in local database or GeoNames API. Please provide coordinates."
                 raise HTTPException(status_code=404, detail=error_msg)
     
     # Fallback default (New Delhi)
