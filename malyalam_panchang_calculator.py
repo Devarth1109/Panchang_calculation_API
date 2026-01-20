@@ -3,6 +3,7 @@
 import sankranti
 from sankranti import Date, Place
 import datetime
+from math import ceil
 from religious_data import TITHI_NAMES, NAKSHATRA_NAMES, YOGA_NAMES, RASHI_NAMES, VARA_NAMES, KARANA_NAMES, SAMVAT_YEAR_NAMES
 from panchang_calculator import AMRIT_KALAM_START_HOURS
 
@@ -79,7 +80,7 @@ MALAYALAM_TITHI_NAMES = {
 ANANDADI_YOGA_NAMES = [
     "Aananda", "Kaladanda", "Thumra", "Prajapathi", "Soumya", "Thulanksha", 
     "Dhwaja", "Shreevatsa", "Vajra", "Mudgara", "Chatra", "Mithra", 
-    "Maanas", "Padmam", "Lumba", "Uthpatha", "Mruthyu", "Kaana", 
+    "Maanas", "Padma", "Lambaka", "Uthpatha", "Mruthyu", "Kaana", 
     "Siddhi", "Shubham", "Amrutha", "Musala", "Kada", "Mathanga", 
     "Rakshasa", "Chara", "Sthira"
 ]
@@ -87,9 +88,9 @@ ANANDADI_YOGA_NAMES = [
 # Fixed Offsets: Verified against DrikPanchang reference data
 ANANDADI_WEEKDAY_OFFSET = {
     0: 0,    # Sunday
-    1: 24,   # Monday
+    1: 23,   # Monday (verified: Thrikketta->Padma)
     2: 20,   # Tuesday
-    3: 15,   # Wednesday
+    3: 16,   # Wednesday
     4: 12,   # Thursday
     5: 8,    # Friday
     6: 4     # Saturday
@@ -102,14 +103,14 @@ TAMIL_YOGA_TABLE = {
         "Amrita", "Siddha", "Siddha", "Marana", "Siddha", "Marana",
         "Amrita", "Amrita", "Amrita", "Siddha", "Marana", "Marana",
         "Siddha", "Amrita", "Amrita"],
-    # Monday (1) - Uthrattathi(index 25)=Marana
+    # Monday (1) - Thrikketta(18)=Siddha, Moolam(19)=Marana, Uthrattathi(26)=Marana
     1: ["Marana", "Siddha", "Siddha", "Amrita", "Amrita", "Marana",
         "Siddha", "Amrita", "Siddha", "Siddha", "Siddha", "Siddha",
-        "Amrita", "Marana", "Siddha", "Siddha", "Siddha", "Marana",
-        "Siddha", "Siddha", "Marana", "Amrita", "Siddha", "Siddha",
+        "Amrita", "Marana", "Siddha", "Siddha", "Siddha", "Siddha",
+        "Marana", "Siddha", "Marana", "Amrita", "Siddha", "Siddha",
         "Siddha", "Marana", "Amrita"],
-    # Tuesday (2)
-    2: ["Amrita", "Siddha", "Marana", "Marana", "Marana", "Siddha",
+    # Tuesday (2) - Bharani=Marana, Karthika=Marana
+    2: ["Amrita", "Marana", "Marana", "Marana", "Marana", "Siddha",
         "Marana", "Siddha", "Marana", "Siddha", "Marana", "Siddha",
         "Siddha", "Marana", "Siddha", "Siddha", "Siddha", "Siddha",
         "Siddha", "Siddha", "Siddha", "Siddha", "Marana", "Marana",
@@ -120,8 +121,8 @@ TAMIL_YOGA_TABLE = {
         "Siddha", "Marana", "Siddha", "Siddha", "Amrita", "Amrita",
         "Siddha", "Siddha", "Siddha", "Amrita", "Siddha", "Siddha",
         "Siddha", "Siddha", "Siddha"],
-    # Thursday (4)
-    4: ["Siddha", "Siddha", "Marana", "Siddha", "Marana", "Marana",
+    # Thursday (4) - Rohini=Marana, Makayiram=Marana
+    4: ["Siddha", "Siddha", "Marana", "Marana", "Marana", "Marana",
         "Siddha", "Amrita", "Siddha", "Siddha", "Siddha", "Marana",
         "Siddha", "Siddha", "Amrita", "Siddha", "Siddha", "Marana",
         "Marana", "Siddha", "Siddha", "Siddha", "Siddha", "Marana",
@@ -296,20 +297,54 @@ class MalayalamPanchangCalculator:
 
         k_data = sankranti.karana(jd_midnight, place)
         def kname(n):
-            if n == 1: return "Kimthugnam"
-            if n == 58: return "Pullu"
-            if n == 59: return "Chathushpadam"
-            if n == 60: return "Nagavu"
+            # Malayalam Karana names
+            if n == 1: return "Puzhu"        # Kimstughna
+            if n == 58: return "Pullu"       # Shakuni
+            if n == 59: return "Nalkali"     # Chatushpada (four-footed)
+            if n == 60: return "Pambu"       # Naga (snake)
             return ["Simham", "Puli", "Panni", "Kazhatha", "Aana", "Surabhi", "Vishti"][(n-2)%7]
         
-        k_list = []
-        seen = set()
-        for i in range(0, len(k_data), 2):
-            kh = k_data[i+1][0] + k_data[i+1][1]/60.0
-            if kh >= sunrise_hours and k_data[i] not in seen:
-                k_list.append((k_data[i], k_data[i+1], kh))
-                seen.add(k_data[i])
-        k_list.sort(key=lambda x: x[2])
+        def get_karana_end_jd(k_num, ref_jd):
+            """Find when karana k_num ends (when moon-sun diff reaches k_num * 6 degrees)"""
+            target_phase = (k_num * 6) % 360  # Handle karana 60 -> 0 degrees
+            
+            def phase_diff(t):
+                moon = sankranti.lunar_longitude(t)
+                sun = sankranti.solar_longitude(t)
+                phase = (moon - sun) % 360
+                # Handle the wraparound at 0/360 degrees
+                diff = phase - target_phase
+                if diff > 180: diff -= 360
+                if diff < -180: diff += 360
+                return diff
+            
+            return sankranti.bisection_search(phase_diff, ref_jd, ref_jd + 1.5)
+        
+        # Get karana at sunrise
+        sunrise_jd_ut = sr_info[0] - info_timezone / 24.0
+        moon_phase_sr = sankranti.lunar_phase(sunrise_jd_ut)
+        karana_at_sr = int(ceil(moon_phase_sr / 6))
+        if karana_at_sr > 60: karana_at_sr = 60
+        if karana_at_sr < 1: karana_at_sr = 1
+        
+        # Calculate when first karana ends
+        k1_end_jd = get_karana_end_jd(karana_at_sr, sunrise_jd_ut)
+        k1_end_local = k1_end_jd + info_timezone / 24.0
+        k1_end_h = ((k1_end_local - jd_midnight) * 24)
+        k1_end_dms = sankranti.to_dms(k1_end_h)
+        
+        k_list = [(karana_at_sr, k1_end_dms, k1_end_h)]
+        
+        # Calculate second karana if it ends before next sunrise
+        next_k_num = (karana_at_sr % 60) + 1
+        k2_end_jd = get_karana_end_jd(next_k_num, k1_end_jd)
+        k2_end_local = k2_end_jd + info_timezone / 24.0
+        k2_end_h = ((k2_end_local - jd_midnight) * 24)
+        
+        if k2_end_h < nsr_h and k2_end_h > k1_end_h:
+            k2_end_dms = sankranti.to_dms(k2_end_h)
+            k_list.append((next_k_num, k2_end_dms, k2_end_h))
+        
         if k_list:
             result['Karana'] = f"{kname(k_list[0][0])} upto {format_time_12hr(k_list[0][1], True, ref_date)}"
             if len(k_list) >= 2:
