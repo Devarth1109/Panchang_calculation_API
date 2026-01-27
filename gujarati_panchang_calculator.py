@@ -286,6 +286,208 @@ class GujaratiPanchangCalculator:
         sunrise_jd_ut = sr_info[0] - info_timezone/24.0
         result_data['Sunsign'] = RASHI_NAMES[int(sankranti.solar_longitude(sunrise_jd_ut)/30)]['english']
         result_data['Moonsign'] = RASHI_NAMES[int(sankranti.lunar_longitude(sunrise_jd_ut)/30)]['english']
+        
+        # Karana calculation
+        def get_karana_name(num):
+            if num == 1: return "Kimstughna"
+            elif num >= 58:
+                if num == 58: return "Shakuni"
+                elif num == 59: return "Chatushpada"
+                elif num == 60: return "Naga"
+            else:
+                idx = (num - 2) % 7
+                name = KARANA_NAMES[idx]
+                if name == "Gara": name = "Garaja"
+                return name
+        
+        karana_data = sankranti.karana(jd_midnight, place)
+        karana_list = []
+        seen_karanas = set()
+        for i in range(0, len(karana_data), 2):
+            if i+1 < len(karana_data):
+                k_num = karana_data[i]
+                k_end = karana_data[i+1]
+                k_end_hours = k_end[0] + k_end[1]/60.0 + k_end[2]/3600.0
+                
+                if k_end_hours >= sunrise_hours and k_num not in seen_karanas:
+                    karana_list.append((k_num, k_end, k_end_hours))
+                    seen_karanas.add(k_num)
+        
+        karana_list.sort(key=lambda x: x[2])
+        
+        if karana_list:
+            karana_num, karana_end_time, _ = karana_list[0]
+            kn = get_karana_name(karana_num)
+            result_data['Karana'] = f"{kn} upto {format_time_12hr(karana_end_time, include_date=True, ref_date=ref_date)}"
+            
+            if len(karana_list) >= 2:
+                karana_num2, karana_end_time2, k2_hours = karana_list[1]
+                kn2 = get_karana_name(karana_num2)
+                if k2_hours < 30:
+                    result_data['Karana'] += f"; {kn2} upto {format_time_12hr(karana_end_time2, include_date=True, ref_date=ref_date)}"
+                else:
+                    result_data['Karana'] += f"; {kn2}"
+            else:
+                next_karana_num = (karana_num % 60) + 1
+                next_kn = get_karana_name(next_karana_num)
+                result_data['Karana'] += f"; {next_kn}"
+        else:
+            result_data['Karana'] = "No karana data"
+        
+        # Kalams
+        rk = sankranti.rahu_kalam(jd_midnight, place)
+        gk = sankranti.gulika_kalam(jd_midnight, place)
+        yg = sankranti.yamaganda_kalam(jd_midnight, place)
+        
+        result_data['Rahu Kalam'] = format_time_range_12hr(rk[0], rk[1], ref_date)
+        result_data['Gulikai Kalam'] = format_time_range_12hr(gk[0], gk[1], ref_date)
+        result_data['Yamaganda'] = format_time_range_12hr(yg[0], yg[1], ref_date)
+        
+        # Abhijit Muhurta
+        if sankranti.vaara(jd_midnight) == 3:
+            result_data['Abhijit'] = "None"
+        else:
+            ab = sankranti.abhijit_muhurta(jd_midnight, place)
+            ab_start = sankranti.to_dms(ab[0])
+            ab_end = sankranti.to_dms(ab[1])
+            result_data['Abhijit'] = format_time_range_12hr(ab_start, ab_end, ref_date)
+        
+        # Dur Muhurtam
+        sunrise_h = sr_info[1][0] + sr_info[1][1]/60.0 + sr_info[1][2]/3600.0
+        sunset_h = ss_info[1][0] + ss_info[1][1]/60.0 + ss_info[1][2]/3600.0
+        
+        next_sr_info = sankranti.sunrise(jd_midnight + 1, place)
+        next_sunrise_h = 24 + next_sr_info[1][0] + next_sr_info[1][1]/60.0 + next_sr_info[1][2]/3600.0
+        
+        night_duration = next_sunrise_h - sunset_h
+        night_muhurta = night_duration / 15.0
+        
+        dm_raw = sankranti.durmuhurtam(jd_midnight, place)
+        
+        dm_start1 = sankranti.to_dms(dm_raw[0][0])
+        dm_end1 = sankranti.to_dms(dm_raw[1][0])
+        dm_str = format_time_range_12hr(dm_start1, dm_end1, ref_date)
+        
+        if dm_raw[0][1] != 0:
+            dm2_start_raw = dm_raw[0][1]
+            dm2_end_raw = dm_raw[1][1]
+            
+            if dm2_start_raw >= sunset_h:
+                night_muhurta_index = round((dm2_start_raw - sunset_h) / night_muhurta)
+                dm2_start_correct = sunset_h + (night_muhurta_index * night_muhurta)
+                dm2_end_correct = sunset_h + ((night_muhurta_index + 1) * night_muhurta)
+                dm_start2 = sankranti.to_dms(dm2_start_correct)
+                dm_end2 = sankranti.to_dms(dm2_end_correct)
+            else:
+                dm_start2 = sankranti.to_dms(dm2_start_raw)
+                dm_end2 = sankranti.to_dms(dm2_end_raw)
+            
+            dm_str += f"; {format_time_range_12hr(dm_start2, dm_end2, ref_date)}"
+        
+        result_data['Dur Muhurtam'] = dm_str
+        
+        # =====================================================================
+        # Varjyam and Amrit Kalam Calculation
+        # =====================================================================
+        # Calculate based on nakshatra at sunrise (DrikPanchang convention)
+        
+        # Find start time of current nakshatra (in UT)
+        def nak_start_dist(t):
+            m = sankranti.lunar_longitude(t)
+            target = (nak_num - 1) * (360/27.0)
+            return sankranti.norm180(m - target)
+        
+        # Search for nakshatra start (could be before sunrise)
+        n_start_jd = sankranti.bisection_search(nak_start_dist, sunrise_jd_ut - 1.5, sunrise_jd_ut + 0.2)
+        
+        # Find nakshatra end time - need special handling for Revati (nakshatra 27)
+        if nak_num == 27:  # Revati - ends at 360°/0°
+            def nak_end_dist(t):
+                m = sankranti.lunar_longitude(t)
+                if m > 180:
+                    return m - 360
+                else:
+                    return m
+            n_end_jd = sankranti.bisection_search(nak_end_dist, sunrise_jd_ut + 0.1, sunrise_jd_ut + 2.0)
+        else:
+            def nak_end_dist(t):
+                m = sankranti.lunar_longitude(t)
+                target = nak_num * (360/27.0)
+                return sankranti.norm180(m - target)
+            n_end_jd = sankranti.bisection_search(nak_end_dist, sunrise_jd_ut, sunrise_jd_ut + 1.2)
+        
+        # Calculate for sunrise nakshatra AND the next one if it starts within the day
+        nakshatras_to_calculate = [{
+            'num': nak_num,
+            'start_jd': n_start_jd,
+            'end_jd': n_end_jd
+        }]
+        
+        # Check if next nakshatra starts before next sunrise
+        if n_end_jd < sunrise_jd_ut + 1.2:
+            next_nak_num = (nak_num % 27) + 1
+            
+            def next_nak_end_dist(t):
+                m = sankranti.lunar_longitude(t)
+                target = next_nak_num * (360/27.0)
+                return sankranti.norm180(m - target)
+            
+            next_n_start_jd = n_end_jd
+            next_n_end_jd = sankranti.bisection_search(next_nak_end_dist, next_n_start_jd, next_n_start_jd + 1.5)
+            
+            nakshatras_to_calculate.append({
+                'num': next_nak_num,
+                'start_jd': next_n_start_jd,
+                'end_jd': next_n_end_jd
+            })
+        
+        # Calculate Varjyam and Amrit Kalam for all relevant nakshatras
+        varjyam_periods = []
+        amrit_periods = []
+        
+        for nak_info in nakshatras_to_calculate:
+            nak_num_calc = nak_info['num']
+            n_start = nak_info['start_jd']
+            n_end = nak_info['end_jd']
+            
+            # Get table values (both are in HOURS for a 24-hour nakshatra)
+            v_start_hours = VARJYAM_START_HOURS.get(nak_num_calc, 0)
+            a_start_hours = AMRIT_KALAM_START_HOURS.get(nak_num_calc, 0)
+            
+            duration_days = n_end - n_start
+            
+            # Varjyam: Starting time = Nakshatra start + (duration * X/24)
+            # Duration = 1/15th of nakshatra = 1.6 hours for 24-hour nakshatra
+            v_s_ut = n_start + (duration_days * v_start_hours / 24.0)
+            v_duration_days = duration_days * 1.6 / 24.0
+            v_e_ut = v_s_ut + v_duration_days
+            
+            # Amrit Kalam: Same formula
+            a_s_ut = n_start + (duration_days * a_start_hours / 24.0)
+            a_duration_days = duration_days * 1.6 / 24.0
+            a_e_ut = a_s_ut + a_duration_days
+            
+            # Only include if it occurs on the panchang day (sunrise to next sunrise)
+            next_sunrise_approx = sunrise_jd_ut + 1.0
+            
+            # Minimum duration threshold (5 minutes in days)
+            MIN_DURATION = 5.0 / (24 * 60)
+            
+            # Include Varjyam only if it starts after current sunrise and before next sunrise
+            if v_s_ut >= sunrise_jd_ut and v_s_ut < next_sunrise_approx and v_duration_days >= MIN_DURATION:
+                v_start_time = jd_to_time_12hr(v_s_ut, info_timezone, ref_date)
+                v_end_time = jd_to_time_12hr(v_e_ut, info_timezone, ref_date)
+                varjyam_periods.append(f"{v_start_time} to {v_end_time}")
+            
+            # Include Amrit Kalam only if it starts after current sunrise and before next sunrise
+            if a_s_ut >= sunrise_jd_ut and a_s_ut < next_sunrise_approx and a_duration_days >= MIN_DURATION:
+                a_start_time = jd_to_time_12hr(a_s_ut, info_timezone, ref_date)
+                a_end_time = jd_to_time_12hr(a_e_ut, info_timezone, ref_date)
+                amrit_periods.append(f"{a_start_time} to {a_end_time}")
+        
+        # Join multiple periods with semicolon
+        result_data['Varjyam'] = "; ".join(varjyam_periods) if varjyam_periods else "None"
+        result_data['Amrit Kalam'] = "; ".join(amrit_periods) if amrit_periods else "None"
     
         full_result = {
             "meta": result_meta,
@@ -408,80 +610,9 @@ class GujaratiPanchangCalculator:
              dm_str += f"; {format_time_range_12hr(to_dms(dm2_start), to_dms(dm2_end), ref_date)}"
              
         result_data['Dur Muhurtam'] = dm_str
-      
-        sunrise_jd_ut = sr_info[0] - info_timezone/24.0
         
-        nak_data = sankranti.nakshatra(jd_midnight, place)
-        nak_num = nak_data[0]
-        
-        def nak_start_dist(t):
-            m = sankranti.lunar_longitude(t)
-            target = (nak_num - 1) * (360/27.0)
-            return sankranti.norm180(m - target)
-            
-        n_start_jd = sankranti.bisection_search(nak_start_dist, sunrise_jd_ut - 1.5, sunrise_jd_ut + 0.2)
-        
-        # Find end
-        def nak_end_dist(t):
-             m = sankranti.lunar_longitude(t)
-             if nak_num == 27 and m > 180: return m - 360 # Revati wrap
-             target = nak_num * (360/27.0)
-             return sankranti.norm180(m - target)
-             
-        n_end_jd = sankranti.bisection_search(nak_end_dist, sunrise_jd_ut, sunrise_jd_ut + 1.2)
-        
-        # List of nakshatras to check (Current + Next)
-        naks_to_check = [{'num': nak_num, 'start': n_start_jd, 'end': n_end_jd}]
-        
-        # If next starts before tomorrow sunrise?
-        if n_end_jd < sunrise_jd_ut + 1.2:
-             next_num = (nak_num % 27) + 1
-             def next_end_dist(t):
-                 m = sankranti.lunar_longitude(t)
-                 if next_num == 27 and m > 180: return m - 360
-                 target = next_num * (360/27.0)
-                 return sankranti.norm180(m - target)
-             
-             next_start = n_end_jd
-             try:
-                 next_end = sankranti.bisection_search(next_end_dist, next_start, next_start + 1.5)
-                 naks_to_check.append({'num': next_num, 'start': next_start, 'end': next_end})
-             except: pass
-        
-        varjyam_list = []
-        amrit_list = []
-        
-        for nak in naks_to_check:
-             num = nak['num']
-             start = nak['start']
-             end = nak['end']
-             dur = end - start
-             
-             # Tables
-             v_start_h = VARJYAM_START_HOURS.get(num, 0)
-             a_start_h = AMRIT_KALAM_START_HOURS.get(num, 0)
-             
-             # Calculate UT times
-             v_s_ut = start + (dur * v_start_h / 24.0)
-             v_dur_days = dur * 1.6 / 24.0
-             v_e_ut = v_s_ut + v_dur_days
-             
-             a_s_ut = start + (dur * a_start_h / 24.0)
-             a_dur_days = dur * 1.6 / 24.0
-             a_e_ut = a_s_ut + a_dur_days
-             
-             # Check if in range (Sunrise to Next Sunrise)
-             next_sunrise_jd_ut = sunrise_jd_ut + 1.0 # approx
-             
-             # Format if valid
-             if v_s_ut >= sunrise_jd_ut and v_s_ut < next_sunrise_jd_ut:
-                  varjyam_list.append(f"{jd_to_time_12hr(v_s_ut, info_timezone, ref_date)} to {jd_to_time_12hr(v_e_ut, info_timezone, ref_date)}")
-             
-             if a_s_ut >= sunrise_jd_ut and a_s_ut < next_sunrise_jd_ut:
-                  amrit_list.append(f"{jd_to_time_12hr(a_s_ut, info_timezone, ref_date)} to {jd_to_time_12hr(a_e_ut, info_timezone, ref_date)}")
-                  
-        result_data['Varjyam'] = "; ".join(varjyam_list) if varjyam_list else "None"
-        result_data['Amrit Kalam'] = "; ".join(amrit_list) if amrit_list else "None"
+        # NOTE: Varjyam and Amrit Kalam are now calculated in calculate() method
+        # No need to recalculate here - the values are already correctly set
         
         return result_data
 
