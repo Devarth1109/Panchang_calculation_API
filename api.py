@@ -5,7 +5,7 @@ from city_utils import load_cities, find_city, get_timezone_offset
 from panchang_calculator import PanchangCalculator
 from choghadiya_calculator import ChoghadiyaCalculator
 from marathi_panchang_calculator import MarathiPanchangCalculator
-from malyalam_panchang_calculator import MalayalamPanchangCalculator
+from gujarati_panchang_calculator import GujaratiPanchangCalculator
 
 app = FastAPI(
     title="Panchang & Choghadiya API", 
@@ -18,7 +18,7 @@ CITIES_DB = load_cities()
 CALC = PanchangCalculator()
 CHOG_CALC = ChoghadiyaCalculator()
 MARATHI_CALC = MarathiPanchangCalculator()
-MALAYALAM_CALC = MalayalamPanchangCalculator()
+GUJARATI_CALC = GujaratiPanchangCalculator()
 
 @app.get("/")
 def read_root():
@@ -28,6 +28,7 @@ def read_root():
             "/panchang": "Hindu Panchang calculations",
             "/choghadiya": "Choghadiya muhurta timings",
             "/marathi-panchang": "Marathi Panchang (Shaka Samvat based)",
+            "/gujrati-panchang": "Gujarati Panchang (Vikram Samvat based)",
             "/malayalam-panchang": "Malayalam Panchang (Kollam Era based)"
         }
     }
@@ -361,9 +362,8 @@ def get_marathi_panchang(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
-@app.get("/malayalam-panchang")
-def get_malayalam_panchang(
+@app.get("/gujrati-panchang")
+def get_gujrati_panchang(
     city: Optional[str] = Query(None, description="City name"),
     state: Optional[str] = Query(None, description="State/Province name"),
     country: Optional[str] = Query(None, description="Country name or country code"),
@@ -377,11 +377,6 @@ def get_malayalam_panchang(
     minute: Optional[int] = Query(None, description="Minute"),
     second: Optional[int] = Query(0, description="Second")
 ):
-    """
-    Malayalam Panchang endpoint - calculates panchang according to Kerala calendar tradition
-    Uses Kollam Era (Kollavarsham) and Solar months (Mesha Sankranti system)
-    """
-    # Default to current time if date/time not provided
     now = datetime.datetime.now()
     if year is None: year = now.year
     if month is None: month = now.month
@@ -429,13 +424,14 @@ def get_malayalam_panchang(
                 error_msg += ". Could not find in local database or GeoNames API. Please provide coordinates."
                 raise HTTPException(status_code=404, detail=error_msg)
     
-    # Fallback default (Thiruvananthapuram, Kerala)
-    if final_lat is None: final_lat = 8.5241
-    if final_lon is None: final_lon = 76.9366
+    # Fallback default (Ahmedabad, Gujarat)
+    if final_lat is None: final_lat = 23.0225
+    if final_lon is None: final_lon = 72.5714
     if final_tz is None: final_tz = 5.5
     
-    try:
-        results = MALAYALAM_CALC.calculate(year, month, day, hour, minute, second, final_lat, final_lon, final_tz)
+    try:        
+        full_result = GUJARATI_CALC.calculate_full(year, month, day, hour, minute, second, final_lat, final_lon, final_tz)
+        results = full_result['data']
         
         # Build comprehensive location info
         location_info = location_name
@@ -461,7 +457,7 @@ def get_malayalam_panchang(
                 "date": f"{year}-{month:02d}-{day:02d}",
                 "time": f"{hour:02d}:{minute:02d}:{second:02d}",
                 "timestamp": f"{year}-{month:02d}-{day:02d} {hour:02d}:{minute:02d}:{second:02d}",
-                "calendar_system": "Malayalam Panchang (Kollam Era, Solar Months)"
+                "calendar_system": "Gujarati Panchang"
             },
             "data": results
         }
