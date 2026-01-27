@@ -334,7 +334,7 @@ class GujaratiPanchangCalculator:
                  next_y_end_jd_ut = sankranti.bisection_search(next_yoga_end_dist, y_end_jd_ut + 0.5, y_end_jd_ut + 1.2)
                  next_y_end = jd_to_time_12hr(next_y_end_jd_ut, info_timezone, ref_date)
                  
-                 yoga_str = f"{yoga_str}\n{next_y_name} upto {next_y_end}"
+                 yoga_str = f"{yoga_str}; {next_y_name} upto {next_y_end}"
              except:
                  pass
         else:
@@ -365,7 +365,7 @@ class GujaratiPanchangCalculator:
                 if k_end_h >= sunrise_hours:
                     karana_str_list.append(f"{k_name} upto {format_time_12hr(k_end, include_date=True, ref_date=ref_date, check_next_day=True)}")
                     
-        result_data['Karana'] = "\n".join(karana_str_list) if karana_str_list else "No data"
+        result_data['Karana'] = "; ".join(karana_str_list) if karana_str_list else "No data"
        
         rk = sankranti.rahu_kalam(jd_midnight, place)
         gk = sankranti.gulika_kalam(jd_midnight, place)
